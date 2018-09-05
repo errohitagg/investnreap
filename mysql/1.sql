@@ -53,6 +53,7 @@ create table `bhavcopy` (
     `totaltrades` mediumint(7) not null default 0,
     `date` date not null,
     primary key (`id`),
+    index (`symbol`),
     index (`date`, `symbol`)
 );
 
