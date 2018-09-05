@@ -1,0 +1,35 @@
+{
+  "name": "investnreap",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "dependencies": {
+    "async": "^2.6.1",
+    "csv": "^3.1.0",
+    "express": "^4.16.3",
+    "got": "^9.2.0",
+    "lodash": "^4.17.10",
+    "machine": "^15.2.2",
+    "moment": "^2.22.2",
+    "mysql": "^2.16.0",
+    "promise": "^8.0.1",
+    "winston": "^3.1.0",
+    "yauzl": "^2.10.0"
+  },
+  "devDependencies": {
+    "nodemon": "^1.18.4"
+},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/errohitagg/investnreap.git"
+  },
+  "author": "Rohit Aggarwal",
+  "license": "",
+  "bugs": {
+    "url": "https://github.com/errohitagg/investnreap/issues"
+  },
+  "homepage": "https://github.com/errohitagg/investnreap#readme"
+}
