@@ -6,6 +6,7 @@ const fs = require('fs');
 const csv = require('csv');
 const util = require('util');
 const mysql = require('mysql');
+const process = require('process');
 
 let date = moment().format("DD"),
     month = moment().format("MMM").toUpperCase(),
@@ -149,7 +150,7 @@ const callable = machine({
                         unzip.on('finish', async function () {
                             
                             await processFile();
-                            await findPotentials();
+                            // await findPotentials();
                             await connection.end();
                         });
                     });
@@ -166,6 +167,18 @@ const callable = machine({
 (async function () {
     
     try {
+        
+        let args = process.argv;
+        if (args.length > 2) {
+            
+            let inputDate = moment(args[2]);
+            date = inputDate.format("DD");
+            month = inputDate.format("MMM").toUpperCase();
+            year = inputDate.format("YYYY");
+            today = inputDate.format("YYYY-MM-DD");
+            filename = "cm" + date + month + year + "bhav.csv";
+        }
+        
         await connection.connect();
         await callable();
     } catch (err) {
