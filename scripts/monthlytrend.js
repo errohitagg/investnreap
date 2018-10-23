@@ -8,13 +8,13 @@ const fs = require('fs');
 
 let connection = mysql.createConnection({
     host: 'localhost',
-    user: 'root',
+    user: 'coulomb',
     password: 'panda',
     database: 'investnreap'
 });
 
 let directory = '.tmp/monthly-trend/',
-    filename = 'monthly-trend-' + (new Date()).getTime() + '.xlsx';
+    filename = 'monthly-trend-' + moment().format("YYYY_MM_DD") + '.xlsx';
 
 connection.connect = util.promisify(connection.connect);
 connection.query = util.promisify(connection.query);

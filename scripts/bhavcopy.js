@@ -18,7 +18,7 @@ let filename = "cm" + date + month + year + "bhav.csv",
     
 let connection = mysql.createConnection({
     host: 'localhost',
-    user: 'root',
+    user: 'coulomb',
     password: 'panda',
     database: 'investnreap'
 });
@@ -75,50 +75,6 @@ const processFile = async function () {
     }
 };
 
-const findPotentials = async function () {
-  
-    try {
-        
-        let companiesquery = 'select c.name, c.symbol from companies c inner join index_companies ic on ic.company_id = c.id inner join indexes i on ic.index_id = i.id where i.name = ?';
-        let bhavcopyquery = "select close, date from bhavcopy where symbol = ? and series = 'EQ' order by date desc limit 5";
-        
-        let companies = await connection.query(companiesquery, ['Nifty 50']);
-        
-        let date;
-        
-        for (let row of companies) {
-            
-            let bhavcopy = await connection.query(bhavcopyquery, [row.symbol]);
-            let close = bhavcopy[0].close, bullish = false, bearish = false;
-            let prices = {};
-            date = moment(bhavcopy[0].date).format("YYYY-MM-DD");
-            prices[date] = bhavcopy[0].close;
-            
-            for (let j = 1; j < bhavcopy.length; j++) {
-                
-                if (close < bhavcopy[j].close) {
-                    bearish = true;
-                } else if (close > bhavcopy[j].close) {
-                    bullish = true;
-                }
-                
-                date = moment(bhavcopy[j].date).format("YYYY-MM-DD");
-                prices[date] = bhavcopy[j].close;
-                close = bhavcopy[j].close;
-            }
-            
-            if (bullish && !bearish) {
-                console.log(util.format("%s [%s]: BULLISH\n\t%j\n", row.name, row.symbol, prices));
-            } else if (!bullish && bearish) {
-                console.log(util.format("%s [%s]: BEARISH\n\t%j\n", row.name, row.symbol, prices));
-            }
-        }
-        
-    } catch (err) {
-        console.trace(err);
-    }
-};
-
 const callable = machine({
     
     identity: 'bhavcopy',
@@ -128,7 +84,16 @@ const callable = machine({
         
         await clearData();
         
-        let download = got.stream(url).pipe(fs.createWriteStream(directory + filename + '.zip'));
+        let stream = got.stream(url);
+        
+        stream.on('error', async function (error, body, response) {
+           
+            console.log("Status Code : " + error.statusCode);
+            console.log("URL : " + error.url);
+            await connection.end();
+        });
+        
+        let download = stream.pipe(fs.createWriteStream(directory + filename + '.zip'));
         
         download.on('finish', function () {
             
@@ -150,7 +115,6 @@ const callable = machine({
                         unzip.on('finish', async function () {
                             
                             await processFile();
-                            // await findPotentials();
                             await connection.end();
                         });
                     });
