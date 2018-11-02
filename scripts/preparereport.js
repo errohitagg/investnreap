@@ -12,7 +12,7 @@ let connection = mysql.createConnection({
     database: 'investnreap'
 });
 
-let directory = '.tmp/monthly-trend/',
+let directory = '/opt/my-work/investnreap/.tmp/monthly-trend/',
     filename = 'monthly-trend-' + moment().format("YYYY_MM_DD") + '.xlsx';
 
 connection.connect = util.promisify(connection.connect);
@@ -59,8 +59,8 @@ const reportLongTrend = async function (date) {
     var finalResult = [];
     try {
 
-        let companiesquery = 'select c.name, c.symbol from companies c inner join index_companies ic on ic.company_id = c.id inner join indexes i on ic.index_id = i.id where i.name = ?';
-        let companies = await connection.query(companiesquery, ['Nifty 50']);
+        let companiesquery = 'select c.name, c.symbol from companies c inner join index_companies ic on ic.company_id = c.id inner join indexes i on ic.index_id = i.id where i.name = ? and ic.status = ?';
+        let companies = await connection.query(companiesquery, ['Nifty 50', 1]);
 
         for (let row of companies) {
 
@@ -90,8 +90,8 @@ const reportShortTrend = async function (date) {
     var finalResult = [];
     try {
 
-        let companiesquery = 'select c.name, c.symbol from companies c inner join index_companies ic on ic.company_id = c.id inner join indexes i on ic.index_id = i.id where i.name = ?';
-        let companies = await connection.query(companiesquery, ['Nifty 50']);
+        let companiesquery = 'select c.name, c.symbol from companies c inner join index_companies ic on ic.company_id = c.id inner join indexes i on ic.index_id = i.id where i.name = ? and ic.status = ?';
+        let companies = await connection.query(companiesquery, ['Nifty 50', 1]);
 
         for (let row of companies) {
 

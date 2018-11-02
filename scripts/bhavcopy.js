@@ -10,11 +10,13 @@ const process = require('process');
 
 let date = moment().format("DD"),
     month = moment().format("MMM").toUpperCase(),
+    monthint = moment().format("MM"),
     year = moment().format("YYYY"),
     today = moment().format("YYYY-MM-DD");
 
 let filename = "cm" + date + month + year + "bhav.csv",
-    directory = ".tmp/bhavcopy/";
+    index_filename = 'ind_close_all_' + date + monthint + year + '.csv',
+    directory = "/opt/my-work/investnreap/.tmp/bhavcopy/";
     
 let connection = mysql.createConnection({
     host: 'localhost',
@@ -34,6 +36,13 @@ util.inspect.defaultOptions = {
 const clearData = async function () {
     
     const query = "delete from bhavcopy where date = '" + today + "'";
+    await connection.query(query);
+    return true;
+}
+
+const clearIndexData = async function () {
+
+    const query = "delete from index_snapshot where date = '" + today + "'";
     await connection.query(query);
     return true;
 }
@@ -75,13 +84,54 @@ const processFile = async function () {
     }
 };
 
-const callable = machine({
+const processIndexFile = async function () {
+    
+    try {
+        
+        let indexlist = {};
+        let indexquery = "select * from indexes";
+        let indexresult = await connection.query(indexquery);
+        for (let row of indexresult) {
+            indexlist[row.name] = row.id;
+        }
+        
+        let csvdata = fs.readFileSync(directory + index_filename);
+        let query = "insert into index_snapshot (index_id, open, high, low, close, date) VALUES ?";
+
+        let csv_parse = util.promisify(csv.parse);
+        let data = await csv_parse(csvdata);
+        insertdata = [];
+
+        for (let i = 1; i < data.length; i++) {
+
+            if (indexlist[data[i][0]] !== undefined) {
+                insertdata.push([
+                    indexlist[data[i][0]],
+                    data[i][2],
+                    data[i][3],
+                    data[i][4],
+                    data[i][5],
+                    today
+                ]);
+            }
+        }
+        await connection.query(query, [insertdata]);
+
+        fs.unlinkSync(directory + index_filename);
+        
+    } catch (err) {
+        console.trace(err);
+    }
+}
+
+const callable1 = machine({
     
     identity: 'bhavcopy',
     fn: async function (inputs, exits) {
         
         let url = "https://www.nseindia.com/content/historical/EQUITIES/" + year + "/" + month + "/" + filename + '.zip';
         
+        await connection.connect();
         await clearData();
         
         let stream = got.stream(url);
@@ -113,7 +163,6 @@ const callable = machine({
                         let unzip = readStream.pipe(fs.createWriteStream(directory + filename));
                         
                         unzip.on('finish', async function () {
-                            
                             await processFile();
                             await connection.end();
                         });
@@ -128,6 +177,36 @@ const callable = machine({
     }
 });
 
+const callable2 = machine({
+
+    identity: 'indexcopy',
+    fn: async function (inputs, exits) {
+
+        let url = "http://www.niftyindices.com/Daily_Snapshot/" + index_filename;
+
+        await connection.connect();
+        await clearIndexData();
+
+        let stream = got.stream(url);
+
+        stream.on('error', async function (error, body, response) {
+
+            console.log("Status Code : " + error.statusCode);
+            console.log("URL : " + error.url);
+            await connection.end();
+        });
+
+        let download = stream.pipe(fs.createWriteStream(directory + index_filename));
+
+        download.on('finish', async function () {
+            await processIndexFile();
+            await connection.end();
+        });
+
+        return exits.success(true);
+    }
+});
+
 (async function () {
     
     try {
@@ -138,13 +217,16 @@ const callable = machine({
             let inputDate = moment(args[2]);
             date = inputDate.format("DD");
             month = inputDate.format("MMM").toUpperCase();
+            monthint = inputDate.format("MM");
             year = inputDate.format("YYYY");
             today = inputDate.format("YYYY-MM-DD");
             filename = "cm" + date + month + year + "bhav.csv";
+            index_filename = 'ind_close_all_' + date + monthint + year + '.csv';
         }
         
-        await connection.connect();
-        await callable();
+        await callable1();
+        await callable2();
+        
     } catch (err) {
         console.trace(err);
     }

@@ -13,7 +13,7 @@ let connection = mysql.createConnection({
     database: 'investnreap'
 });
 
-let directory = '.tmp/monthly-trend/',
+let directory = '/opt/my-work/investnreap/.tmp/monthly-trend/',
     filename = 'monthly-trend-' + moment().format("YYYY_MM_DD") + '.xlsx';
 
 connection.connect = util.promisify(connection.connect);
@@ -60,9 +60,12 @@ const reportMonthlyTrend = async function (date, month) {
         
         let startdate = moment(date);
         startdate.subtract(month, 'months');
-
-        let companiesquery = 'select c.name, c.symbol from companies c inner join index_companies ic on ic.company_id = c.id inner join indexes i on ic.index_id = i.id where i.name = ?';
-        let companies = await connection.query(companiesquery, ['Nifty 50']);
+        
+        let indexquery = 'select s.date, s.close from index_snapshot as s inner join indexes as i on i.id = s.index_id where i.name = ? and s.date >= ? order by s.date asc';
+        let indexes = await connection.query(indexquery, ['Nifty 50', startdate.format("YYYY-MM-DD")]);
+        
+        let companiesquery = 'select c.name, c.symbol from companies c inner join index_companies ic on ic.company_id = c.id inner join indexes i on ic.index_id = i.id where i.name = ? and ic.status = ?';
+        let companies = await connection.query(companiesquery, ['Nifty 50', 1]);
         
         let datesquery = 'select distinct date from bhavcopy where date >= ? order by date asc';
         let dates = await connection.query(datesquery, [startdate.format("YYYY-MM-DD")]);
@@ -104,6 +107,28 @@ const reportMonthlyTrend = async function (date, month) {
         sheet.cell(rowIndex, index++).string('Negatives');
         rowIndex++;
         finalIndex = index;
+        
+        index = 1;
+        sheet.cell(rowIndex, index++).string("Nifty 50");
+        let nifty50value = indexes[0].close;
+        for (let row of indexes) {
+            
+            let indexdate = moment(row.date).format("YYYY-MM-DD");
+            if (dateindexes[indexdate] === undefined) {
+                continue;
+            }
+            
+            if (nifty50value < row.close) {
+                sheet.cell(rowIndex, dateindexes[indexdate] + 1).number(row.close).style(positiveStyle);
+                nifty50value = row.close;
+            } else if (nifty50value > row.close) {
+                sheet.cell(rowIndex, dateindexes[indexdate] + 1).number(row.close).style(negativeStyle);
+                nifty50value = row.close;
+            } else {
+                sheet.cell(rowIndex, dateindexes[indexdate] + 1).number(row.close);
+            }
+        }
+        rowIndex++;
         
         for (let row of companies) {
 
