@@ -13,7 +13,7 @@ let date = moment().format("DD"),
     monthint = moment().format("MM"),
     year = moment().format("YYYY"),
     today = moment().format("YYYY-MM-DD");
-
+    
 let filename = "cm" + date + month + year + "bhav.csv",
     index_filename = 'ind_close_all_' + date + monthint + year + '.csv',
     directory = "/opt/my-work/investnreap/.tmp/bhavcopy/";
@@ -131,46 +131,48 @@ const callable1 = machine({
         
         let url = "https://www.nseindia.com/content/historical/EQUITIES/" + year + "/" + month + "/" + filename + '.zip';
         
-        await connection.connect();
         await clearData();
         
-        let stream = got.stream(url);
-        
-        stream.on('error', async function (error, body, response) {
+        await new Promise(function (resolve, reject) {
            
-            console.log("Status Code : " + error.statusCode);
-            console.log("URL : " + error.url);
-            await connection.end();
-        });
-        
-        let download = stream.pipe(fs.createWriteStream(directory + filename + '.zip'));
-        
-        download.on('finish', function () {
-            
-            yauzl.open(directory + filename + '.zip', function (err, zipfile) {
+            let stream = got.stream(url);
 
-                if (err) {
-                    console.trace(err);
-                    return;
-                }
+            stream.on('error', async function (error, body, response) {
 
-                zipfile.on('entry', function (entry) {
-                    zipfile.openReadStream(entry, function (err, readStream) {
-                        if (err) {
-                            console.trace(err);
-                            return;
-                        }
-                        let unzip = readStream.pipe(fs.createWriteStream(directory + filename));
-                        
-                        unzip.on('finish', async function () {
-                            await processFile();
-                            await connection.end();
-                        });
-                    });
-
-                });
+                console.log("Status Code : " + error.statusCode);
+                console.log("URL : " + error.url);
+                return reject();
             });
-            
+
+            let download = stream.pipe(fs.createWriteStream(directory + filename + '.zip'));
+
+            download.on('finish', function () {
+
+                yauzl.open(directory + filename + '.zip', function (err, zipfile) {
+
+                    if (err) {
+                        console.trace(err);
+                        return reject();
+                    }
+
+                    zipfile.on('entry', function (entry) {
+                        zipfile.openReadStream(entry, function (err, readStream) {
+                            if (err) {
+                                console.trace(err);
+                                return reject();
+                            }
+                            let unzip = readStream.pipe(fs.createWriteStream(directory + filename));
+
+                            unzip.on('finish', async function () {
+                                await processFile();
+                                return resolve();
+                            });
+                        });
+
+                    });
+                });
+
+            });
         });
         
         return exits.success(true);
@@ -184,23 +186,26 @@ const callable2 = machine({
 
         let url = "http://www.niftyindices.com/Daily_Snapshot/" + index_filename;
 
-        await connection.connect();
         await clearIndexData();
+        
+        await new Promise(function (resolve, reject) {
+            
+            let stream = got.stream(url);
 
-        let stream = got.stream(url);
+            stream.on('error', function (error, body, response) {
 
-        stream.on('error', async function (error, body, response) {
+                console.log("Status Code : " + error.statusCode);
+                console.log("URL : " + error.url);
+                return reject();
+            });
 
-            console.log("Status Code : " + error.statusCode);
-            console.log("URL : " + error.url);
-            await connection.end();
-        });
+            let download = stream.pipe(fs.createWriteStream(directory + index_filename));
 
-        let download = stream.pipe(fs.createWriteStream(directory + index_filename));
-
-        download.on('finish', async function () {
-            await processIndexFile();
-            await connection.end();
+            download.on('finish', async function () {
+                
+                await processIndexFile();
+                return resolve();
+            });
         });
 
         return exits.success(true);
@@ -224,11 +229,21 @@ const callable2 = machine({
             index_filename = 'ind_close_all_' + date + monthint + year + '.csv';
         }
         
+        await connection.connect();
+        
         await callable1();
         await callable2();
         
+        if (connection.threadId) {
+            await connection.end();
+        }
+        
     } catch (err) {
+        
         console.trace(err);
+        if (connection.threadId) {
+            await connection.end();
+        }
     }
     
 })();
