@@ -4,6 +4,7 @@ const util = require('util');
 const mysql = require('mysql');
 const nodemailer = require('nodemailer');
 const fs = require('fs');
+const _ = require('lodash');
 
 let connection = mysql.createConnection({
     host: 'localhost',
@@ -11,6 +12,9 @@ let connection = mysql.createConnection({
     password: 'panda',
     database: 'investnreap'
 });
+
+var shortTrendIn = [3, 5, 7],
+    longTrendIn = [7, 10, 12];
 
 let directory = '/opt/my-work/investnreap/.tmp/monthly-trend/',
     filename = 'monthly-trend-' + moment().format("YYYY_MM_DD") + '.xlsx';
@@ -26,12 +30,10 @@ util.inspect.defaultOptions = {
 const findBhavTrend = async function (symbol, date, limit) {
     
     let bhavcopyquery = "select close, date from bhavcopy where symbol = ? and series = 'EQ' and date <= ? order by date desc limit ?";
-    let bhavcopy = await connection.query(bhavcopyquery, [symbol, date, limit]);
+    let bhavcopy = await connection.query(bhavcopyquery, [symbol, date, limit + 1]);
     let close = bhavcopy[0].close, bullish = false, bearish = false;
     let prices = {};
-    date = moment(bhavcopy[0].date).format("YYYY-MM-DD");
-    prices[date] = bhavcopy[0].close;
-
+    
     for (let j = 1; j < bhavcopy.length; j++) {
 
         if (close < bhavcopy[j].close) {
@@ -54,7 +56,7 @@ const findBhavTrend = async function (symbol, date, limit) {
     }
 }
 
-const reportLongTrend = async function (date) {
+const reportTrend = async function (date, trendList) {
     
     var finalResult = [];
     try {
@@ -63,18 +65,20 @@ const reportLongTrend = async function (date) {
         let companies = await connection.query(companiesquery, ['Nifty 50', 1]);
 
         for (let row of companies) {
-
-            let result1 = await findBhavTrend(row.symbol, date, 5),
-                result2 = await findBhavTrend(row.symbol, date, 10),
-                result3 = await findBhavTrend(row.symbol, date, 30);
-
-            if (result1 != null || result2 != null || result3 != null) {
+            
+            let trend = [];
+            for (let trendIn of trendList) {
+                let result = await findBhavTrend(row.symbol, date, trendIn);
+                trend.push(result);
+            }
+            let trendResult = _.reduce(trend, function (sum, val) {
+                return sum + (val != null ? 1 : 0);
+            }, 0);
+            if (trendResult > 0) {
                 finalResult.push({
                     name: row.name,
                     symbol: row.symbol,
-                    five: result1,
-                    ten: result2,
-                    thirty: result3
+                    trend: trend
                 });
             }
         }
@@ -85,37 +89,6 @@ const reportLongTrend = async function (date) {
     return finalResult;
 }
 
-const reportShortTrend = async function (date) {
-    
-    var finalResult = [];
-    try {
-
-        let companiesquery = 'select c.name, c.symbol from companies c inner join index_companies ic on ic.company_id = c.id inner join indexes i on ic.index_id = i.id where i.name = ? and ic.status = ?';
-        let companies = await connection.query(companiesquery, ['Nifty 50', 1]);
-
-        for (let row of companies) {
-
-            let result1 = await findBhavTrend(row.symbol, date, 5),
-                result2 = await findBhavTrend(row.symbol, date, 7),
-                result3 = await findBhavTrend(row.symbol, date, 10);
-            
-            if (result1 != null || result2 != null || result3 != null) {
-                finalResult.push({
-                    name: row.name,
-                    symbol: row.symbol,
-                    five: result1,
-                    seven: result2,
-                    ten: result3
-                });
-            }
-        }
-
-    } catch (err) {
-        console.trace(err);
-    }
-    return finalResult;
-};
-
 var mailTrends = function (shortTrend, longTrend) {
     
     var mailhtml = "";
@@ -125,17 +98,17 @@ var mailTrends = function (shortTrend, longTrend) {
         mailhtml += "<tr>";
         mailhtml += "<th>Company</th>";
         mailhtml += "<th>Symbol</th>";
-        mailhtml += "<th>5 days</th>";
-        mailhtml += "<th>7 days</th>";
-        mailhtml += "<th>10 days</th>";
+        for (let trendIn of shortTrendIn) {
+            mailhtml += "<th>" + trendIn + " days</th>";
+        }
         mailhtml += "</tr>";
         for (let trend of shortTrend) {
             mailhtml += "<tr>";
             mailhtml += "<td>" + trend.name + "</td>";
             mailhtml += "<td>" + trend.symbol + "</td>";
-            mailhtml += "<td>" + (trend.five != null ? trend.five : '-') + "</td>";
-            mailhtml += "<td>" + (trend.seven != null ? trend.seven : '-') + "</td>";
-            mailhtml += "<td>" + (trend.ten != null ? trend.ten : '-') + "</td>";
+            for (let i = 0; i < shortTrendIn.length; i++) {
+                mailhtml += "<td>" + (trend.trend[i] != null ? trend.trend[i] : '-') + "</td>";
+            }
             mailhtml += "</tr>";
         }
         mailhtml += "</table >";
@@ -144,27 +117,27 @@ var mailTrends = function (shortTrend, longTrend) {
     }
     
     mailhtml += "<h1>Long Trend:</h1>";
-    if (shortTrend.length > 0) {
+    if (longTrend.length > 0) {
         mailhtml += "<table cellspacing='1' cellpadding='1' border='1'>";
         mailhtml += "<tr>";
         mailhtml += "<th>Company</th>";
         mailhtml += "<th>Symbol</th>";
-        mailhtml += "<th>5 days</th>";
-        mailhtml += "<th>10 days</th>";
-        mailhtml += "<th>30 days</th>";
+        for (let trendIn of longTrendIn) {
+            mailhtml += "<th>" + trendIn + " days</th>";
+        }
         mailhtml += "</tr>";
-        for (let trend of shortTrend) {
+        for (let trend of longTrend) {
             mailhtml += "<tr>";
             mailhtml += "<td>" + trend.name + "</td>";
             mailhtml += "<td>" + trend.symbol + "</td>";
-            mailhtml += "<td>" + (trend.five != null ? trend.five : '-') + "</td>";
-            mailhtml += "<td>" + (trend.ten != null ? trend.ten : '-') + "</td>";
-            mailhtml += "<td>" + (trend.thirty != null ? trend.thirty : '-') + "</td>";
+            for (let i = 0; i < longTrendIn.length; i++) {
+                mailhtml += "<td>" + (trend.trend[i] != null ? trend.trend[i] : '-') + "</td>";
+            }
             mailhtml += "</tr>";
         }
         mailhtml += "</table >";
     } else {
-        mailHtml += "<p>No particular long trend</p>";
+        mailhtml += "<p>No particular long trend</p>";
     }
     
     let transporter = nodemailer.createTransport({
@@ -206,8 +179,8 @@ const callable = machine({
     identity: 'prepare report',
     fn: async function (inputs, exits) {
 
-        var shorttrend = await reportShortTrend(moment().format("YYYY-MM-DD"));
-        var longtrend = await reportLongTrend(moment().format("YYYY-MM-DD"));
+        var shorttrend = await reportTrend(moment().format("YYYY-MM-DD"), shortTrendIn);
+        var longtrend = await reportTrend(moment().format("YYYY-MM-DD"), longTrendIn);
         mailTrends(shorttrend, longtrend);
         await connection.end();
         
