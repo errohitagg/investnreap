@@ -70,14 +70,140 @@ const reportMonthlyTrend = async function (date, month) {
         let datesquery = 'select distinct date from bhavcopy where date >= ? order by date asc';
         let dates = await connection.query(datesquery, [startdate.format("YYYY-MM-DD")]);
         
-        let dateindexes = {}, startindex = 2;
+        let resultdata = [
+            {
+                name: "Name",
+                symbol: "Symbol",
+                positives: "Positives",
+                negatives: "Negatives"
+            }
+        ];
+        
         for (let date of dates) {
             date = moment(date.date).format("YYYY-MM-DD");
-            dateindexes[date] = startindex++;
+            resultdata[0][date] = date;
         }
         
+        let resultset = {
+            name: "Nifty 50",
+            symbol: "",
+            positives: "",
+            negatives: ""
+        }
+        for (let row of indexes) {
+            let indexdate = moment(row.date).format("YYYY-MM-DD");
+            resultset[indexdate] = row.close;
+        }
+        resultdata.push(resultset);
+        
+        for (let row of companies) {
+
+            let result = await findMonthlyTrend(row.symbol, startdate);
+            let positive = _.sumBy(result, function (data) {
+                return data.change > 0 ? 1 : 0;
+            });
+            let negative = _.sumBy(result, function (data) {
+                return data.change < 0 ? 1 : 0;
+            });
+            
+            let resultset = {
+                name: row.name,
+                symbol: row.symbol,
+                positives: positive,
+                negatives: negative
+            }
+            
+            for (let data of result) {
+                resultset[data.date] = data.close;
+            }
+            resultdata.push(resultset);
+        }
+        
+        return resultdata;
+
+    } catch (err) {
+        console.trace(err);
+    }
+};
+
+const reportTradedTrend = async function (date, month) {
+    
+    try {
+        
+        let startdate = moment(date), enddate = moment(date);
+        startdate.subtract(month, 'months');
+        let dates = [];
+        
+        do {
+            
+            let checkquery = "select date from index_snapshot where date <= ? order by date desc limit 1";
+            let checkdate = await connection.query(checkquery, [enddate.format("YYYY-MM-DD")]);
+            
+            if (checkdate && checkdate[0]) {
+                dates.push(checkdate[0].date);
+            }
+            enddate.subtract(20, 'days');
+            
+        } while (startdate < enddate);
+        
+        let tradedquery = 'select c.id, c.name, c.symbol, s.name as sector from companies c inner join sectors s on c.sector_id = s.id where c.traded = ?';
+        let tradedcompanies = await connection.query(tradedquery, [1]);
+        
+        let result = [
+            {
+                company: "Company Name",
+                symbol: "Symbol",
+                sector: "Sector"
+            }
+        ];
+        
+        for (let date of dates) {
+            date = moment(date).format("YYYY-MM-DD");
+            result[0][date] = date;
+        }
+        
+        for (let company of tradedcompanies) {
+            
+            let bhavquery = 'select close, date from bhavcopy where symbol = ? and series = ? and date in (?)';
+            let bhavs = await connection.query(bhavquery, [company.symbol, 'EQ', dates]);
+            
+            let resultdata = {
+                company: company.name,
+                symbol: company.symbol,
+                sector: company.sector
+            };
+            
+            for (let bhav of bhavs) {
+                date = moment(bhav.date).format("YYYY-MM-DD");
+                resultdata[date] = bhav.close;
+            }
+            result.push(resultdata);
+        }
+        
+        return result;
+
+    } catch (err) {
+        console.trace(err);
+    }
+}
+
+const prepareReport = machine({
+    
+    identity: 'prepare report',
+    inputs: {
+        monthlyTrend: {
+            type: 'ref',
+            required: true
+        },
+        tradedTrend: {
+            type: 'ref',
+            required: true
+        }
+    },
+    fn: async function (inputs, exits) {
+        
         let workbook = new xl.Workbook();
-        let sheet = workbook.addWorksheet('MonthTrend');
+        let monthlysheet = workbook.addWorksheet('MonthTrend');
 
         let negativeStyle = workbook.createStyle({
             fill: {
@@ -93,105 +219,136 @@ const reportMonthlyTrend = async function (date, month) {
                 bgColor: '#b9ffb9',
                 fgColor: '#b9ffb9'
             }
-            });
+        });
         
         let index = 1;
         let rowIndex = 1;
-        let finalIndex;
-        sheet.cell(rowIndex, index++).string('Name');
-        sheet.cell(rowIndex, index++).string('Symbol');
-        for (let date in dateindexes) {
-            sheet.cell(rowIndex, index++).string(date);
+        let monthlyTrendRestricted = ['name', 'symbol', 'positives', 'negatives'];
+        let dateIndexMap = {};
+        
+        monthlysheet.cell(rowIndex, index++).string(inputs.monthlyTrend[0].name);
+        monthlysheet.cell(rowIndex, index++).string(inputs.monthlyTrend[0].symbol);
+        for (let key in inputs.monthlyTrend[0]) {
+            if (monthlyTrendRestricted.indexOf(key) === -1) {
+                dateIndexMap[inputs.monthlyTrend[0][key]] = index;
+                monthlysheet.cell(rowIndex, index++).string(inputs.monthlyTrend[0][key]);
+            }
         }
-        sheet.cell(rowIndex, index++).string('Positives');
-        sheet.cell(rowIndex, index++).string('Negatives');
+        monthlysheet.cell(rowIndex, index++).string(inputs.monthlyTrend[0].positives);
+        monthlysheet.cell(rowIndex, index++).string(inputs.monthlyTrend[0].negatives);
         rowIndex++;
-        finalIndex = index;
+        index = 1;
+        
+        for (let i = 1; i < inputs.monthlyTrend.length; i++) {
+            
+            monthlysheet.cell(rowIndex, index++).string(inputs.monthlyTrend[i].name);
+            monthlysheet.cell(rowIndex, index++).string(inputs.monthlyTrend[i].symbol);
+            
+            let lastvalue = Number.MIN_VALUE;
+            for (let key in inputs.monthlyTrend[i]) {
+                
+                if (monthlyTrendRestricted.indexOf(key) === -1) {
+                    
+                    let value = inputs.monthlyTrend[i][key];
+                    if (lastvalue < value && lastvalue != Number.MIN_VALUE) {
+                        monthlysheet.cell(rowIndex, dateIndexMap[key]).string(value.toString()).style(positiveStyle);
+                    } else if (lastvalue > value) {
+                        monthlysheet.cell(rowIndex, dateIndexMap[key]).string(value.toString()).style(negativeStyle);
+                    } else {
+                        monthlysheet.cell(rowIndex, dateIndexMap[key]).string(value.toString());
+                    }
+                    lastvalue = value;
+                    index++;
+                }
+            }
+            
+            monthlysheet.cell(rowIndex, index++).string(inputs.monthlyTrend[i].positives.toString());
+            monthlysheet.cell(rowIndex, index++).string(inputs.monthlyTrend[i].negatives.toString());
+            
+            rowIndex++;
+            index = 1;
+        }
+        
+        let tradedsheet = workbook.addWorksheet('TradedTrend');
         
         index = 1;
-        sheet.cell(rowIndex, index++).string("Nifty 50");
-        let nifty50value = indexes[0].close;
-        for (let row of indexes) {
-            
-            let indexdate = moment(row.date).format("YYYY-MM-DD");
-            if (dateindexes[indexdate] === undefined) {
-                continue;
-            }
-            
-            if (nifty50value < row.close) {
-                sheet.cell(rowIndex, dateindexes[indexdate] + 1).number(row.close).style(positiveStyle);
-                nifty50value = row.close;
-            } else if (nifty50value > row.close) {
-                sheet.cell(rowIndex, dateindexes[indexdate] + 1).number(row.close).style(negativeStyle);
-                nifty50value = row.close;
-            } else {
-                sheet.cell(rowIndex, dateindexes[indexdate] + 1).number(row.close);
+        rowIndex = 1;
+        let tradedTrendRestricted = ['company', 'symbol', 'sector'];
+        dateIndexMap = {};
+        
+        tradedsheet.cell(rowIndex, index++).string(inputs.tradedTrend[0].company);
+        tradedsheet.cell(rowIndex, index++).string(inputs.tradedTrend[0].symbol);
+        tradedsheet.cell(rowIndex, index++).string(inputs.tradedTrend[0].sector);
+        for (let key in inputs.tradedTrend[0]) {
+            if (tradedTrendRestricted.indexOf(key) === -1) {
+                dateIndexMap[inputs.tradedTrend[0][key]] = index;
+                tradedsheet.cell(rowIndex, index++).string(inputs.tradedTrend[0][key]);
             }
         }
         rowIndex++;
+        index = 1;
         
-        for (let row of companies) {
-
-            let result = await findMonthlyTrend(row.symbol, startdate);
-            let positive = _.sumBy(result, function (data) {
-                return data.change > 0 ? 1 : 0;
-            });
-            let negative = _.sumBy(result, function (data) {
-                return data.change < 0 ? 1 : 0;
-            });
+        for (let i = 1; i < inputs.tradedTrend.length; i++) {
             
-            index = 1;
-            sheet.cell(rowIndex, index++).string(row.name);
-            sheet.cell(rowIndex, index++).string(row.symbol);
-            for (let data of result) {
-                
-                if (dateindexes[data.date] == undefined) {
-                    continue;
-                }
-                
-                if (data.change > 0) {
-                    sheet.cell(rowIndex, dateindexes[data.date] + 1).number(data.close).style(positiveStyle);
-                } else if (data.change < 0) {
-                    sheet.cell(rowIndex, dateindexes[data.date] + 1).number(data.close).style(negativeStyle);
-                } else {
-                    sheet.cell(rowIndex, dateindexes[data.date] + 1).number(data.close);
+            tradedsheet.cell(rowIndex, index++).string(inputs.tradedTrend[i].company);
+            tradedsheet.cell(rowIndex, index++).string(inputs.tradedTrend[i].symbol);
+            tradedsheet.cell(rowIndex, index++).string(inputs.tradedTrend[i].sector);
+            
+            for (let key in inputs.tradedTrend[i]) {
+                if (tradedTrendRestricted.indexOf(key) === -1) {
+                    
+                    let value = inputs.tradedTrend[i][key] || "";
+                    tradedsheet.cell(rowIndex, dateIndexMap[key]).string(value.toString());
+                    lastvalue = value;
+                    index++;
                 }
             }
             
-            sheet.cell(rowIndex, finalIndex - 2).number(positive);
-            sheet.cell(rowIndex, finalIndex - 1).number(negative);
             rowIndex++;
+            index = 1;
         }
         
         let fd = fs.openSync(directory + filename, 'w');
         fs.closeSync(fd);
         
         workbook.write(directory + filename);
-
-    } catch (err) {
-        console.trace(err);
+        return exits.success(true);
     }
-};
+});
 
-const callable = machine({
+const callable1 = machine({
 
     identity: 'monthly trend',
     fn: async function (inputs, exits) {
 
-        await reportMonthlyTrend(moment().format("YYYY-MM-DD"), 1);
-        await connection.end();
+        let trend = await reportMonthlyTrend(moment().format("YYYY-MM-DD"), 1);
+        return exits.success(trend);
+    }
+});
 
-        return exits.success(true);
+const callable2 = machine({
+    
+    identity: 'traded trend',
+    fn: async function (inputs, exits) {
+        
+        let trend = await reportTradedTrend(moment().format("YYYY-MM-DD"), 3);
+        return exits.success(trend);
     }
 });
 
 (async function () {
 
     try {
+        
         await connection.connect();
-        await callable();
+        
+        let monthlyTrend = await callable1();
+        let tradedTrend = await callable2();
+        await prepareReport({ monthlyTrend: monthlyTrend, tradedTrend: tradedTrend });
+        
+        await connection.end();
+        
     } catch (err) {
         console.trace(err);
     }
-
 })();
